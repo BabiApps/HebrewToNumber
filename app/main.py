@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
 from pydantic import BaseModel
+import json
 from app.parser import hebrew_to_number
 
 app = FastAPI(
@@ -8,6 +12,10 @@ app = FastAPI(
     description="API to convert Hebrew text numbers to decimal numbers",
     version="1.1.0"
 )
+
+# mount static files and templates
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+templates = Jinja2Templates(directory="app/templates")
 
 class NumberRequest(BaseModel):
     text: str
@@ -20,173 +28,179 @@ def convert_text_to_number(text: str):
         return {"error": str(e)}
 
 @app.get("/", response_class=HTMLResponse)
-def home():
+def home(request: Request):
     examples = [
-        "אלף מאתיים שלושים וארבע",
-        "מיליון וחצי",
-        "2.5 מיליארד",
-        "67 אלף",
-        "שלוש מאות אלף שש מאות ושבעים",
-        "עשרים ושלושה אלף ארבע מאות חמישים ושש"
+    # Up to 10 helpful, somewhat complex examples for users to try
+    "מיליון וחצי",
+    "מיליארד שלוש מאות מיליון וחצי",
+    "שלוש וחצי מיליון",
+    "מיליון שלוש מאות אלף חמש מאות וחצי",
+    "שבע מאות שמונים ותשע אלף מאתיים שלושים ואחד",
+    "עשרים ושלושה אלף ארבע מאות חמישים ושש",
+    "מאה אלף חצי",
+    "אלף שלוש וחצי",
+    "2.5 מיליארד",
+    "תשע מאות תשעים ותשע מיליון תשע מאות תשעים ותשע אלף תשע מאות תשעים ותשע",
     ]
     example_cards = "".join([
-        f"""
-        <div class="example-card">
-            <span class="example-text">{ex}</span>
-            <span class="copy-icon" onclick="copyToClipboard('{ex}')">&#128203;</span>
-        </div>
         """
+        <div class="example-card">
+            <span class="example-text">%s</span>
+            <span class="copy-icon">&#128203;</span>
+        </div>
+        """ % ex
         for ex in examples
     ])
 
-    html_content = f"""
+    examples_json = json.dumps(examples, ensure_ascii=False)
+
+    html_template = """
     <!DOCTYPE html>
     <html lang="he">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
         <title>Hebrew Number Parser</title>
+        <link href="https://fonts.googleapis.com/css2?family=Alef:wght@400;700&display=swap" rel="stylesheet">
         <style>
+            :root { --accent: #2563eb; --muted: #6b7280; --bg: #f7f9fc; }
             body {{
-                font-family: Arial, sans-serif;
-                margin: 40px;
-                background: #f9f9f9;
-                color: #333;
+                font-family: 'Alef', Arial, sans-serif;
+                margin: 0;
+                background: var(--bg);
+                color: #0f172a;
                 direction: rtl;
+                -webkit-font-smoothing:antialiased;
             }}
-            h1 {{ color: #4a90e2; }}
-            .container {{
-                max-width: 900px;
-                margin: auto;
-                background: #fff;
-                padding: 30px;
-                border-radius: 10px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            }}
-            #hebrewText {{
-                width: 80%;
-                padding: 15px;
-                font-size: 1.2rem;
-                border-radius: 10px;
-                border: 1px solid #ccc;
-                box-shadow: inset 0 2px 5px rgba(0,0,0,0.05);
-                margin-bottom: 15px;
-            }}
-            button {{
-                padding: 10px 20px;
-                font-size: 1rem;
-                background: #4a90e2;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                cursor: pointer;
-            }}
-            button:hover {{ background: #357ab8; }}
-            #result {{
-                background: #f0f0f0;
-                padding: 20px;
-                border-radius: 10px;
-                text-align: left;
-                font-size: 1.1rem;
-                white-space: pre-wrap;
-                word-break: break-word;
-                margin-top: 15px;
-            }}
-            h2 {{ margin-top: 40px; }}
-            .example-card {{
-                background: #e8e8e8;
-                padding: 10px 15px;
-                margin-bottom: 10px;
-                margin-left: 10px;
-                margin-right: 10px;
-                border-radius: 8px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                font-size: 1rem;
-            }}
-            .example-text {{ flex-grow: 1; }}
-            .copy-icon {{
-                cursor: pointer;
-                margin-left: 10px;
-                font-size: 1.2rem;
-                color: #4a90e2;
-            }}
-            .links a {{
-                margin-right: 15px;
-                color: #4a90e2;
-                text-decoration: none;
-            }}
-            .links a:hover {{ text-decoration: underline; }}
-            #result {{
-                background: #f0f0f0;
-                padding: 20px;
-                border-radius: 10px;
-                text-align: left; /* חשוב לשמור על מספרים מיושרים לשמאל */
-                font-size: 1.1rem;
-                white-space: pre-wrap;
-                word-break: break-word;
-                border: 1px solid #ccc;
-                min-height: 35px;
-            }}
-            .example-card {{
-                background: #e8e8e8;
-                padding: 10px 15px;
-                margin-bottom: 10px;
-                border-radius: 8px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                font-size: 1rem;
-                width: 40%;
-            }}
+            .wrap {{max-width:1000px;margin:36px auto;padding:24px}}
+            .card {{background:#fff;border-radius:14px;padding:28px;box-shadow:0 8px 24px rgba(2,6,23,0.06)}}
+            header{{display:flex;align-items:center;justify-content:space-between;gap:16px}}
+            h1{{margin:0;color:var(--accent);font-size:1.6rem}}
+            .subtitle{{color:var(--muted);margin-top:6px}}
+
+            .controls{{display:flex;gap:12px;align-items:center;margin-top:18px}}
+            #hebrewText{{flex:1;padding:12px 14px;border-radius:10px;border:1px solid #e6edf6;font-size:1.05rem}}
+            button.primary{{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:10px;cursor:pointer}}
+            button.ghost{{background:transparent;border:1px solid #e6edf6;color:var(--accent);padding:8px 12px;border-radius:10px;cursor:pointer}}
+
+            .result{{margin-top:18px;display:flex;gap:12px;align-items:flex-start}}
+            .result .box{{flex:1;background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #e6edf6;min-height:56px}}
+            .result .value{{font-weight:700;font-size:1.2rem;text-align:left}}
+            .small{{color:var(--muted);font-size:0.9rem}}
+
+            .examples-grid{{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}}
+            .example-card{{background:linear-gradient(180deg,#fbfdff,#f3f8ff);padding:10px 12px;border-radius:10px;cursor:pointer;border:1px solid #e6edf6;flex:1 1 calc(50% - 12px);min-width:220px;display:flex;align-items:center;justify-content:space-between}}
+            .example-card:hover{{box-shadow:0 6px 18px rgba(37,99,235,0.12)}}
+            .example-left{{display:flex;flex-direction:column;align-items:flex-end}}
+            .example-text{{font-size:0.98rem}}
+            .example-note{{font-size:0.8rem;color:var(--muted);margin-top:6px;text-align:left}}
+
+            footer{{margin-top:22px;display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:0.9rem}}
+
+            @media (max-width:640px){{.example-card{{flex:1 1 100%}}header{{flex-direction:column;align-items:flex-start}}}}
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>Hebrew Number Parser API</h1>
-            <p>הקלד מספר בעברית ולחץ על "המר" כדי לראות את המספר העשרוני:</p>
-            <input type="text" id="hebrewText" placeholder="לדוגמא: אלף מאתיים שלושים וארבע">
-            <button onclick="convertNumber()">המר</button>
+        <div class="wrap">
+            <div class="card">
+                <header>
+                    <div>
+                        <h1>Hebrew Number Parser</h1>
+                        <div class="subtitle">המרת טקסט מספרי בעברית למספר עשרוני — תומך בחצאים, נקודות, ומכפילים גדולים</div>
+                    </div>
+                    <div class="small">גרסה 1.1.0 • <a href="/docs" target="_blank">API</a></div>
+                </header>
 
-            <h3>פלט:</h3>
-            <pre id="result">---</pre>
+                <div class="controls">
+                    <input id="hebrewText" placeholder="לדוגמא: מיליון וחצי" aria-label="Hebrew number input">
+                    <button class="primary" onclick="convertNumber()">המר</button>
+                    <button class="ghost" onclick="fillExample()">דוגמה אקראית</button>
+                </div>
 
-            <h2>דוגמאות להרצה</h2>
-            {example_cards}
+                <div class="result">
+                    <div class="box">
+                        <div class="small">פלט מפורמט</div>
+                        <div id="resultFormatted" class="result-value value">---</div>
+                        <div class="small" style="margin-top:6px">JSON: <code id="resultRaw">---</code></div>
+                    </div>
+                    <div style="width:120px;display:flex;flex-direction:column;gap:8px;">
+                        <button class="ghost" onclick="copyResult()">העתק פלט</button>
+                        <button class="ghost" onclick="clearAll()">נקה</button>
+                    </div>
+                </div>
 
-            <div class="links" style="margin-top:40px;">
-                <a href="/docs" target="_blank">Swagger UI</a>
-                <a href="/redoc" target="_blank">ReDoc</a>
+                <h2 style="margin-top:22px">דוגמאות מסובכות — נסו להעתיק ולערוך</h2>
+                <div class="examples-grid">
+                    __EXAMPLE_CARDS__
+                </div>
+
+                <footer>
+                    <div>מפתחים: BabiApps</div>
+                    <div>הכיווניות: RTL • הממשק פועל ללא חיבור לאינטרנט (חוץ מ־Google Fonts)</div>
+                </footer>
             </div>
         </div>
 
-        <script>
-            async function convertNumber() {{
-                const text = document.getElementById("hebrewText").value;
-                const resultEl = document.getElementById("result");
-                try {{
-                    const response = await fetch('/hebrew-number', {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ text }})
-                    }});
-                    const data = await response.json();
-                    // הפלט נראה יפה עם JSON string יפה
-                    resultEl.textContent = data.number.toLocaleString('en-US') || data.error;
-                }} catch (err) {{
-                    resultEl.textContent = 'Error: ' + err;
-                }}
-            }}
+            <script>
+            const EXAMPLES = __EXAMPLES_JSON__;
+            function formatNumber(n){
+                if(n === undefined || n === null) return '---';
+                if(typeof n === 'number') return n.toLocaleString('en-US');
+                return String(n);
+            }
 
-            function copyToClipboard(text) {{
-                navigator.clipboard.writeText(text);
-            }}
+            async function convertNumber(){
+                const input = document.getElementById('hebrewText');
+                const text = input.value.trim();
+                const formatted = document.getElementById('resultFormatted');
+                const raw = document.getElementById('resultRaw');
+                if(!text){ formatted.textContent = 'הכנס טקסט בעברית'; raw.textContent = '—'; return; }
+                formatted.textContent = '…'; raw.textContent = '…';
+                try{
+                    const res = await fetch('/hebrew-number', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+                    const data = await res.json();
+                    if(data.number !== undefined){
+                        formatted.textContent = formatNumber(data.number);
+                        raw.textContent = JSON.stringify(data, null, 0);
+                    } else {
+                        formatted.textContent = data.error || 'שגיאה';
+                        raw.textContent = JSON.stringify(data, null, 0);
+                    }
+                }catch(e){ formatted.textContent = 'Error'; raw.textContent = String(e); }
+            }
 
+            function copyResult(){
+                const raw = document.getElementById('resultRaw').textContent || '';
+                navigator.clipboard.writeText(raw);
+            }
+
+            function clearAll(){
+                document.getElementById('hebrewText').value = '';
+                document.getElementById('resultFormatted').textContent = '---';
+                document.getElementById('resultRaw').textContent = '---';
+            }
+
+            function fillExample(){
+                const pick = EXAMPLES[Math.floor(Math.random()*EXAMPLES.length)];
+                document.getElementById('hebrewText').value = pick;
+            }
+
+            // wire up example cards
+            document.addEventListener('DOMContentLoaded', ()=>{
+                const container = document.querySelector('.examples-grid');
+                // example cards were pre-rendered server-side; attach click handlers
+                const cards = container.querySelectorAll('.example-card');
+                cards.forEach((card, idx)=>{
+                    card.addEventListener('click', ()=>{ document.getElementById('hebrewText').value = EXAMPLES[idx]; });
+                });
+            });
         </script>
     </body>
     </html>
     """
-    return HTMLResponse(content=html_content, status_code=200)
+
+    # render template with examples
+    return templates.TemplateResponse('index.html', {"request": request, "examples": examples})
 
 @app.post("/hebrew-number")
 def convert_number_post(req: NumberRequest):
