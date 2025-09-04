@@ -15,7 +15,7 @@
           <h1>Hebrew Number Parser</h1>
           <div class="subtitle">המרת טקסט מספרי בעברית למספר עשרוני</div>
         </div>
-        <div class="small">גרסה 1.1 • <a href="/docs" target="_blank">API</a></div>
+        <div class="small">גרסה 1.2 • <a href="/docs" target="_blank">API</a></div>
       </header>
 
       <div class="controls">
@@ -28,7 +28,7 @@
         <div class="box">
           <div class="small">פלט מפורמט</div>
           <div id="resultFormatted" class="result-value value">---</div>
-          <div class="small" style="margin-top:6px">JSON: <code id="resultRaw">---</code></div>
+          <div class="small" style="margin-top:6px; direction:ltr; text-align:left;"><code id="resultRaw">---</code></div>
         </div>
         <div style="width:120px;display:flex;flex-direction:column;gap:8px;">
           <button class="ghost" onclick="copyResult()">העתק פלט</button>
@@ -76,7 +76,7 @@
         const data = await res.json();
         if(data.number !== undefined){
           formatted.textContent = formatNumber(data.number);
-          raw.textContent = JSON.stringify(data, null, 0);
+          raw.textContent = JSON.stringify(data, null, 2);
         } else {
           formatted.textContent = data.error || 'שגיאה';
           raw.textContent = JSON.stringify(data, null, 0);

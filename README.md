@@ -1,56 +1,42 @@
-# Hebrew Number Parser API
+# Hebrew Number Parser
 
-מערכת להמרת מספרים בעברית למספרים עשרוניים באמצעות API ו-UI מודרני.
+ממיר ביטויי מספר בעברית לערכים מספריים – (כולל API ו‑UI).
 
-## תיאור
-הפרויקט מספק API ועמוד אינטרנט להמרת טקסטים של מספרים בעברית (למשל "אלף מאתיים שלושים וארבע") לערכים עשרוניים.
+## מה זה עושה
+- מפענח יחידות/עשרות/מאות (כולל “שבע מאות”) ומכפילים: **אלף/אלפים/מיליון/מיליארד**.
+- תומך בשברים: **חצי**, **רבע** (גם אחרי מכפיל כמו “מיליון וחצי”).
+- תומך בעשרוניות עם **“נקודה”**: ספרות (“נקודה אפס אפס חמש”) או ביטוי גדול (“נקודה שבע מאות ושבע”, “נקודה שבע אלף”).
+- קשיח: ניסוחים לא תקינים (למשל “חמישים אלפיים”, “אלף שמונים שבעים”, “מיליון מיליון”) זורקים `ValueError`.
 
-### דוגמה לשימוש ב-API
-- בקשת POST ל-`/hebrew-number` עם גוף:
-  ```json
-  {
-    "text": "אלף מאתיים שלושים וארבע"
-  }
-  ```
-  תגובה:
-  ```json
-  {
-    "number": 1234
-  }
-  ```
+## איך משתמשים?
+```python
+from app.parser import hebrew_to_number
 
-- בקשת GET ל-`/hebrew-number?text=מיליון וחצי`
+print(hebrew_to_number("אלף מאה וחמישים"))           # 1150
+print(hebrew_to_number("מיליון וחצי"))               # 1500000.0
+print(hebrew_to_number("חמישים ושש נקודה שבע אלף"))   # 56.7000
+print(hebrew_to_number("אלף שלוש ורבע"))             # 1003.25
+```
 
-### דף הבית
-עמוד הבית מאפשר להכניס טקסט בעברית ולקבל את המספר העשרוני, כולל דוגמאות מוכנות להעתקה.
+(קיימת גרסה גם ב JavaScript)
 
-## התקנה והרצה
-1. התקן את התלויות:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. הרץ את השרת:
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-3. פתח את הדפדפן בכתובת:
-   [http://localhost:8000](http://localhost:8000)
+## API  (FastAPI)
+- GET: `/hebrew-number?text=אלף מאה וחמישים`
+- POST: `/hebrew-number` עם JSON: `{ "text": "אלף מאה וחמישים" }`
+- GET: `/` - דף נחיתה עם ממשק נחמד
 
-## תיעוד API
-- Swagger: [http://localhost:8000/docs](http://localhost:8000/docs)
-- ReDoc: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+### הרצה מקומית
+```bash
+python -m pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-## דוגמאות להרצה
-- "אלף מאתיים שלושים וארבע"
-- "מיליון וחצי"
-- "2.5 מיליארד"
-- "67 אלף"
-- "שלוש מאות אלף שש מאות ושבעים"
-- "עשרים ושלושה אלף ארבע מאות חמישים ושש"
-
-## תרומה
-תרומות, תיקונים ושיפורים יתקבלו בברכה!
+## בדיקות
+```bash
+pytest -q
+```
 
 ---
+מצאתם בעיה או רוצים לשפר? מוזמנים לפתוח **Issue** או להגיש **Pull Request**.
 
-Hebrew Number Parser API - Convert Hebrew text numbers to decimal integers.
+Made By BabiApps

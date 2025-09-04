@@ -12,23 +12,15 @@ hebrew_units = {
     "שמונה": 8,
     "תשע": 9, "תשעה": 9,
 }
-
 hebrew_tens = {
     "עשר": 10, "עשרה": 10,
-    "עשרים": 20,
-    "שלושים": 30,
-    "ארבעים": 40,
-    "חמישים": 50,
-    "שישים": 60,
-    "שבעים": 70,
-    "שמונים": 80,
-    "תשעים": 90,
+    "עשרים": 20, "שלשים": 30, "שלושים": 30,
+    "ארבעים": 40, "חמישים": 50, "שישים": 60,
+    "שבעים": 70, "שמונים": 80, "תשעים": 90,
 }
-
 hebrew_hundreds = {
-    "מאה": 100,
-    "מאתיים": 200,
-    "שלוש מאות": 300,
+    "מאה": 100, "מאתיים": 200, "מאתים": 200,
+    "שלוש מאות": 300, "שלושה מאות": 300,
     "ארבע מאות": 400,
     "חמש מאות": 500,
     "שש מאות": 600,
@@ -36,206 +28,227 @@ hebrew_hundreds = {
     "שמונה מאות": 800,
     "תשע מאות": 900,
 }
+scales = {"אלף": 1000, "אלפים": 1000, "מיליון": 1_000_000, "מליון": 1_000_000, "מיליארד": 1_000_000_000, "מליארד": 1_000_000_000}
+fractions_map = {"חצי": 0.5, "רבע": 0.25}
 
-multipliers = {
-    "אלף": 1_000,
-    "אלפיים": 2_000,
-    "אלפים": 1_000,
-    "מיליון": 1_000_000,
-    "מליון": 1_000_000,
-    "מיליארד": 1_000_000_000,
-    "מליארד": 1_000_000_000,
-}
+def _is_number_token(tok: str) -> bool:
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?", tok))
 
-
-def hebrew_to_number(text: str) -> float:
-    """
-    גרסה בטוחה של הפונקציה הממירה טקסט בעברית למספר עשרוני.
-    מחזירה ValueError במקום לזרוק חריגה.
-    """
+def _tokenize(text: str):
     parts_raw = text.replace("־", " ").split()
-    # keep flags whether a token started with 'ו' (e.g., 'וחצי')
     has_vav = [p.startswith("ו") and len(p) > 1 for p in parts_raw]
     parts = [p[1:] if hv else p for p, hv in zip(parts_raw, has_vav)]
-    total = 0
-    current = 0
-    i = 0
+    # normalize "אלפיים" -> "שניים אלפים"
+    normalized = []
+    vflags = []
+    for tok, hv in zip(parts, has_vav):
+        if tok == "אלפיים":
+            normalized.extend(["שניים", "אלפים"])
+            vflags.extend([False, False])
+        else:
+            normalized.append(tok); vflags.append(hv)
+    return normalized, vflags
 
-    # keep track of last multiplier to check order
-            # מאות כשתי מילים
+def _parse_decimal_phrase(tokens):
+    """Parse tokens after 'נקודה' into digits string according to rules:
+       - supports digits, units, tens, hundreds (including two-word 'X מאות'), and אלף/אלפים.
+       - phrase is interpreted as an integer, then used as fractional digits: 0.<digits>"""
+    # detect magnitudes
+    has_magnitude = False
+    for i, t in enumerate(tokens):
+        if t in hebrew_tens or t in hebrew_hundreds or t in ("אלף", "אלפים"):
+            has_magnitude = True; break
+        if i + 1 < len(tokens) and f"{t} {tokens[i+1]}" in hebrew_hundreds:
+            has_magnitude = True; break
+    # compute integer value
+    val = 0
+    group = 0
+    k = 0
+    while k < len(tokens):
+        t = tokens[k]
+        if k + 1 < len(tokens) and f"{t} {tokens[k+1]}" in hebrew_hundreds:
+            group += hebrew_hundreds[f"{t} {tokens[k+1]}"]
+            k += 2; continue
+        if t in hebrew_hundreds:
+            group += hebrew_hundreds[t]; k += 1; continue
+        if t in hebrew_tens:
+            group += hebrew_tens[t]; k += 1; continue
+        if t in hebrew_units:
+            group += hebrew_units[t]; k += 1; continue
+        if re.fullmatch(r"\d+", t):
+            group = group * (10 ** len(t)) + int(t); k += 1; continue
+        if t in ("אלף", "אלפים"):
+            if group == 0:
+                group = 1
+            val = val * 1000 + group * 1000
+            group = 0
+            k += 1; continue
+        break
+    val += group
+    digits = str(int(val)) if val > 0 else "0"
+    if not has_magnitude:
+        # preserve explicit leading zeros
+        lead_zeros = 0
+        for t in tokens:
+            if t == "אפס" or re.fullmatch(r"0+", t):
+                lead_zeros += 1
+            else:
+                break
+        if lead_zeros:
+            digits = "0" * lead_zeros + (str(int(val)) if val > 0 else "0")
+    return digits
 
-    last_was_half = False
-    groups = []
-    current_group = 0
+def hebrew_to_number(text: str) -> float:
+    parts, has_vav = _tokenize(text)
     i = 0
+    groups = []  # list of (value, multiplier)
+    current_group = 0.0
+    used_fraction = False
+    seen_tens_in_segment = False  # reset on scales
+    last_scale_value = None
+
+    # strictness pre-checks
+    for idx in range(len(parts) - 1):
+        # two tens in same contiguous segment (without hitting scale)
+        if parts[idx] in hebrew_tens:
+            j = idx + 1
+            if j < len(parts) and parts[j] == "ו":
+                j += 1
+            if j < len(parts) and parts[j] in hebrew_tens:
+                raise ValueError("ניסוח לא תקין: שתי עשרות ברצף באותו מספר. נסי לנסח מחדש (למשל: 'אלף מאה וחמישים' במקום 'אלף שמונים שבעים').")
+        # 'חמישים אלפיים' style
+        if parts[idx] in hebrew_tens and (parts[idx+1] == "אלפיים" or (idx+2 < len(parts) and parts[idx+1] in ("שניים","שתיים","שני") and parts[idx+2] == "אלפים")):
+            raise ValueError("ניסוח לא תקין: 'חמישים אלפיים' אינו תקין. כתבי 'חמישים אלף' או 'חמישים ושניים אלף'.")
+
     while i < len(parts):
-        word = parts[i]
-        # special handling for standalone 'חצי'
-        if word == "חצי":
-            # if 'חצי' precedes a multiplier: 'חצי מיליון' => 0.5 * מיליון
-            if i + 1 < len(parts) and parts[i + 1] in multipliers:
-                if last_was_half:
-                    raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                groups.append((0.5, multipliers[parts[i + 1]]))
-                current_group = 0
-                last_was_half = True
-                i += 2
-                continue
-            # otherwise treat as 0.5 added to the current (fractional) part
-            if last_was_half:
-                raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-            current_group += 0.5
-            last_was_half = True
+        w = parts[i]
+
+        # decimal point
+        if w == "נקודה":
+            j = i + 1
+            allowed = []
+            while j < len(parts):
+                t = parts[j]
+                if t == "ו": break
+                if t in ("מיליון", "מליון", "מיליארד", "מליארד"): break
+                # two-word hundreds
+                if j + 1 < len(parts) and f"{t} {parts[j+1]}" in hebrew_hundreds:
+                    allowed.append(t); allowed.append(parts[j+1]); j += 2; continue
+                if re.fullmatch(r"\d+", t) or t in hebrew_units or t in hebrew_tens or t in hebrew_hundreds or t in ("אלף","אלפים"):
+                    allowed.append(t); j += 1; continue
+                break
+            if not allowed:
+                raise ValueError("ניסוח לא תקין: אחרי 'נקודה' חייב לבוא ביטוי מספרי (למשל: 'נקודה חמש' / 'נקודה שבע מאות').")
+            digits = _parse_decimal_phrase(allowed)
+            current_group += float("0." + digits)
+            i = j
+            continue
+
+        # separate 'ו חצי' / 'ו רבע'
+        if w == "ו" and i + 1 < len(parts) and parts[i+1] in fractions_map:
+            if used_fraction:
+                raise ValueError("לא ניתן להשתמש בתוספת שבר (חצי/רבע) יותר מפעם אחת בביטוי")
+            frac = fractions_map[parts[i+1]]
+            if current_group > 0:
+                current_group += frac
+            elif groups:
+                # attach to last scale
+                last_mult = groups[-1][1]
+                groups.append((frac, last_mult))
+            else:
+                current_group += frac
+            used_fraction = True
+            i += 2
+            continue
+
+        # standalone 'חצי' / 'רבע'
+        if w in fractions_map:
+            if used_fraction:
+                raise ValueError("לא ניתן להשתמש בתוספת שבר (חצי/רבע) יותר מפעם אחת בביטוי")
+            current_group += fractions_map[w]
+            used_fraction = True
             i += 1
             continue
-        # מאות כשתי מילים
-        if i + 1 < len(parts):
-            two_words = f"{word} {parts[i+1]}"
-            if two_words in hebrew_hundreds:
-                # בדיקה אם "חצי" בא אחרי מאות
-                if i + 2 < len(parts) and parts[i+2] == "חצי":
-                    if last_was_half:
-                        raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                    current_group += hebrew_hundreds[two_words] + 0.5
-                    last_was_half = True
-                    i += 3
-                    continue
-                current_group += hebrew_hundreds[two_words]
-                last_was_half = False
+
+        # numeric token
+        if _is_number_token(w):
+            num = float(w)
+            # optionally followed by 'ו חצי/חצי' etc.
+            if i + 2 < len(parts) and parts[i+1] == "ו" and parts[i+2] in fractions_map and not used_fraction:
+                num += fractions_map[parts[i+2]]
+                used_fraction = True
+                i += 3
+            elif i + 1 < len(parts) and parts[i+1] in fractions_map and not used_fraction:
+                num += fractions_map[parts[i+1]]
+                used_fraction = True
                 i += 2
-                continue
-        # מספרים עשרוניים
-        if re.match(r"^\d+(\.\d+)?$", word):
-            # בדיקה אם "חצי" בא אחרי מספר
-            if i + 1 < len(parts) and parts[i + 1] == "חצי":
-                if last_was_half:
-                    raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                current_group += float(word) + 0.5
-                last_was_half = True
-                i += 2
-                continue
-            current_group += float(word)
-            last_was_half = False
+            else:
+                i += 1
+            current_group += num
+            seen_tens_in_segment = False
+            continue
+
+        # two-word hundreds
+        if i + 1 < len(parts) and f"{w} {parts[i+1]}" in hebrew_hundreds:
+            current_group += hebrew_hundreds[f"{w} {parts[i+1]}"]
+            i += 2
+            seen_tens_in_segment = False
+            continue
+
+        # single-word hundreds
+        if w in hebrew_hundreds:
+            current_group += hebrew_hundreds[w]
+            i += 1
+            seen_tens_in_segment = False
+            continue
+
+        # tens
+        if w in hebrew_tens:
+            if seen_tens_in_segment:
+                raise ValueError("ניסוח לא תקין: שתי עשרות ברצף באותו מספר. נסי לנסח מחדש (למשל: 'אלף מאה וחמישים' במקום 'אלף שמונים שבעים').")
+            current_group += hebrew_tens[w]
+            i += 1
+            seen_tens_in_segment = True
+            continue
+
+        # units
+        if w in hebrew_units:
+            current_group += hebrew_units[w]
             i += 1
             continue
-        # מאות
-        if word in hebrew_hundreds:
-            # בדיקה אם "חצי" בא אחרי מאות
-            if i + 1 < len(parts) and parts[i+1] == "חצי":
-                if last_was_half:
-                    raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                current_group += hebrew_hundreds[word] + 0.5
-                last_was_half = True
-                i += 2
-                continue
-            current_group += hebrew_hundreds[word]
-            last_was_half = False
-            i += 1
-            continue
-        # עשרות
-        if word in hebrew_tens:
-            # בדיקה אם "חצי" בא אחרי עשרות
-            if i + 1 < len(parts) and parts[i+1] == "חצי":
-                if last_was_half:
-                    raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                current_group += hebrew_tens[word] + 0.5
-                last_was_half = True
-                i += 2
-                continue
-            current_group += hebrew_tens[word]
-            last_was_half = False
-            i += 1
-            continue
-        # יחידות
-        if word in hebrew_units:
-            val = hebrew_units[word]
-            # בדיקה אם "וחצי" בא אחרי מספר יחידות
-            if i + 2 < len(parts) and parts[i + 1] == "ו" and parts[i + 2] == "חצי":
-                if last_was_half:
-                    raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                current_group += val + 0.5
-                last_was_half = True
+
+        # scales
+        if w in scales:
+            mult = scales[w]
+            # enforce descending order of scales: once a scale is used, following scales must be strictly smaller
+            if last_scale_value is not None and mult >= last_scale_value:
+                raise ValueError("ניסוח לא תקין: לא ניתן להשתמש בשני מכפילים מאותו סדר גודל או גדול יותר ברצף (למשל 'מיליון מיליון', 'אלף מיליון').")
+            last_scale_value = mult
+            group_val = current_group if current_group != 0 else 1
+            groups.append((group_val, mult))
+            current_group = 0.0
+            seen_tens_in_segment = False
+
+            # attached 'ו' fraction after scale (e.g., 'מיליון וחצי' or 'מיליון ו חצי')
+            if i + 2 < len(parts) and parts[i+1] == "ו" and parts[i+2] in fractions_map:
+                if used_fraction:
+                    raise ValueError("לא ניתן להשתמש בתוספת שבר (חצי/רבע) יותר מפעם אחת בביטוי")
+                groups.append((fractions_map[parts[i+2]], mult))
+                used_fraction = True
                 i += 3
                 continue
-            elif i + 1 < len(parts) and parts[i + 1] == "חצי":
-                if last_was_half:
-                    raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                current_group += val + 0.5
-                last_was_half = True
+            if i + 1 < len(parts) and has_vav[i+1] and parts[i+1] in fractions_map:
+                if used_fraction:
+                    raise ValueError("לא ניתן להשתמש בתוספת שבר (חצי/רבע) יותר מפעם אחת בביטוי")
+                groups.append((fractions_map[parts[i+1]], mult))
+                used_fraction = True
                 i += 2
                 continue
-            else:
-                current_group += val
-                last_was_half = False
-                i += 1
-                continue
-        # multipliers
-        if word in multipliers:
-            multiplier_value = multipliers[word]
-            if groups and multiplier_value >= groups[-1][1]:
-                raise ValueError(f"Unlogical multiplier word order: \ncurrent: {word} ({multiplier_value}), last: {groups[-1][1]}")
-            # detect attached 'וחצי' or separated 'ו חצי'
-            attached_half = False
-            if i + 2 < len(parts) and parts[i + 1] == "ו" and parts[i + 2] == "חצי":
-                attached_half = True
-            elif i + 1 < len(parts) and has_vav[i + 1] and parts[i + 1] == "חצי":
-                attached_half = True
 
-            if attached_half:
-                if last_was_half:
-                    raise ValueError("לא ניתן להשתמש ב'חצי' פעמיים ברצף")
-                # If a larger multiplier was already seen (e.g., מיליארד ... מיליון וחצי)
-                # the trailing 'וחצי' is treated as half a unit (0.5), not half of the smaller multiplier.
-                larger_before = bool(groups and groups[-1][1] > multiplier_value)
-                if current_group == 0:
-                    if larger_before:
-                        groups.append((1, multiplier_value))
-                        groups.append((0.5, 1))
-                    else:
-                        groups.append((1.5, multiplier_value))
-                else:
-                    if larger_before:
-                        groups.append((current_group, multiplier_value))
-                        groups.append((0.5, 1))
-                    else:
-                        groups.append((current_group + 0.5, multiplier_value))
-                current_group = 0
-                last_was_half = True
-                i += 2 if parts[i + 1] == "ו" else 2
-                continue
+            i += 1
+            continue
 
-            # normal attached multiplier
-            if current_group == 0:
-                groups.append((1, multiplier_value))
-                current_group = 0
-                last_was_half = False
-                i += 1
-                continue
-            else:
-                groups.append((current_group, multiplier_value))
-                current_group = 0
-                last_was_half = False
-                i += 1
-                continue
-        # ביטויים כפולי מילים (multipliers)
-        if i + 1 < len(parts):
-            two_words = f"{word} {parts[i+1]}"
-            if two_words in multipliers:
-                multiplier_value = multipliers[two_words]
-                if groups and multiplier_value >= groups[-1][1]:
-                    raise ValueError(f"סדר מילים לא הגיוני: {two_words}")
-                if current_group == 0:
-                    current_group = 1
-                groups.append((current_group, multiplier_value))
-                current_group = 0
-                last_was_half = False
-                i += 2
-                continue
-        raise ValueError(f"מילה לא מוכרת: {word}")
+        raise ValueError(f"מילה לא מוכרת: {w}")
 
-    # סכימה סופית
-    total = 0
-    for group, multiplier in groups:
-        total += group * multiplier
-    total += current_group
+    total = sum(g*m for g, m in groups) + current_group
     return total
