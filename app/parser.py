@@ -115,10 +115,10 @@ def hebrew_to_number(text: str) -> float:
             if j < len(parts) and parts[j] == "ו":
                 j += 1
             if j < len(parts) and parts[j] in hebrew_tens:
-                raise ValueError("ניסוח לא תקין: שתי עשרות ברצף באותו מספר. נסי לנסח מחדש (למשל: 'אלף מאה וחמישים' במקום 'אלף שמונים שבעים').")
+                raise ValueError("ניסוח לא תקין: שתי עשרות ברצף באותו מספר. נסה לנסח מחדש (למשל: 'אלף מאה וחמישים' במקום 'אלף שמונים שבעים').")
         # 'חמישים אלפיים' style
         if parts[idx] in hebrew_tens and (parts[idx+1] == "אלפיים" or (idx+2 < len(parts) and parts[idx+1] in ("שניים","שתיים","שני") and parts[idx+2] == "אלפים")):
-            raise ValueError("ניסוח לא תקין: 'חמישים אלפיים' אינו תקין. כתבי 'חמישים אלף' או 'חמישים ושניים אלף'.")
+            raise ValueError("ניסוח לא תקין: 'חמישים אלפיים' אינו תקין. כתוב 'חמישים אלף' או 'חמישים ושניים אלף'.")
 
     while i < len(parts):
         w = parts[i]
@@ -205,7 +205,7 @@ def hebrew_to_number(text: str) -> float:
         # tens
         if w in hebrew_tens:
             if seen_tens_in_segment:
-                raise ValueError("ניסוח לא תקין: שתי עשרות ברצף באותו מספר. נסי לנסח מחדש (למשל: 'אלף מאה וחמישים' במקום 'אלף שמונים שבעים').")
+                raise ValueError("ניסוח לא תקין: שתי עשרות ברצף באותו מספר. נסה לנסח מחדש (למשל: 'אלף מאה וחמישים' במקום 'אלף שמונים שבעים').")
             current_group += hebrew_tens[w]
             i += 1
             seen_tens_in_segment = True
